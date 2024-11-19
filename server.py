@@ -20,7 +20,7 @@ import uvicorn
 from huggingface_hub import login
 from speechbrain.utils.fetching import LocalStrategy
 
-HUGGINGFACE_TOKEN = "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"
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
