@@ -1,0 +1,5 @@
+.venv
+.vscode
+server.py
+server
+voice_samples

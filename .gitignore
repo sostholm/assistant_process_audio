@@ -5,7 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
-
+.vscode
+voice_samples
 # Distribution / packaging
 .Python
 build/
