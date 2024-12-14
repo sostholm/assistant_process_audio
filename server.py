@@ -19,6 +19,8 @@ from pyannote.core import Annotation, Segment
 import uvicorn
 from huggingface_hub import login
 from speechbrain.utils.fetching import LocalStrategy
+from .database import get_users_voice_recognition
+import io
 
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
@@ -62,10 +64,10 @@ logger.info("Loaded pyannote speaker diarization and embedding models")
 
 # Load reference audio embeddings for known speakers
 reference_embeddings = {}
-known_speakers = {
-    "speaker1": "voice_samples/keeva.mp3",
-    "speaker2": "voice_samples/sam.mp3"
-}
+# known_speakers = {
+#     "speaker1": "voice_samples/keeva.mp3",
+#     "speaker2": "voice_samples/sam.mp3"
+# }
 def extract_embedding(signal, sample_rate):
     # Ensure signal is a tensor on the correct device
     signal = signal.to(device)
@@ -76,16 +78,22 @@ def extract_embedding(signal, sample_rate):
     embedding = embedding.squeeze(0)  # Remove batch dimension
     return embedding
 
-for speaker, audio_path in known_speakers.items():
-    signal, sample_rate = torchaudio.load(audio_path)
-    if sample_rate != 16000:
-        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-        signal = resampler(signal)
-    if signal.shape[0] > 1:
-        signal = torch.mean(signal, dim=0, keepdim=True)
-    embedding = extract_embedding(signal, sample_rate)
-    reference_embeddings[speaker] = embedding
-    logger.info(f"Loaded reference embedding for {speaker}")
+# Load voice recognition data from the database
+known_users = get_users_voice_recognition()
+
+# Load reference embeddings for known speakers
+for user in known_users:
+    for voice_data in user.voice_recognition:
+        mp3_stream = io.BytesIO(voice_data)
+        signal, sample_rate = torchaudio.load(mp3_stream, format="mp3")
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+            signal = resampler(signal)
+        if signal.shape[0] > 1:
+            signal = torch.mean(signal, dim=0, keepdim=True)
+        embedding = extract_embedding(signal, sample_rate)
+        reference_embeddings[user.nick_name] = embedding
+        logger.info(f"Loaded reference embedding for {user.nick_name}")
 
 def transcribe(audio_file_path):
     # Transcribe the audio file

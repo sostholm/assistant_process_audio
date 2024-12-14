@@ -5,3 +5,6 @@ websockets
 torch==2.3.1
 ctranslate2==4.4.0
 pyannote.audio==3.3.2
+psycopg==3.1.18
+psycopg-binary==3.1.18
+python-ulid==2.5.0
