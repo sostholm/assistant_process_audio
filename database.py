@@ -7,7 +7,7 @@ POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 # Connect to your PostgreSQL database
 conn = psycopg.connect(
-    dbname="assistant",
+    dbname="assistant_v2",
     user=POSTGRES_USER,
     password=POSTGRES_PASSWORD,
     host="192.168.0.218",
