@@ -21,6 +21,7 @@ from huggingface_hub import login
 from speechbrain.utils.fetching import LocalStrategy
 from .database import get_users_voice_recognition
 import io
+import json
 
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
@@ -165,7 +166,7 @@ def associate_speakers(transcription, diarization_result, identified_speakers):
             identified_speaker = identified_speakers.get(speaker_label, "Unknown")
         else:
             identified_speaker = "Unknown"
-        final_transcription.append(f"{identified_speaker}: {text}")
+        final_transcription.append({identified_speaker: text})
     return final_transcription
 
 async def transcribe_audio(websocket: WebSocket):
@@ -217,12 +218,12 @@ async def transcribe_audio(websocket: WebSocket):
             final_transcription = associate_speakers(transcription, diarization_result, identified_speakers)
 
             # Send the final transcription back to the client
-            final_transcription_text = "\n".join(final_transcription)
-            await websocket.send_text(final_transcription_text)
+            # final_transcription_text = "\n".join(final_transcription)
+            await websocket.send_text(json.dumps(final_transcription))
 
     except Exception as e:
         logger.error(f"Error during WebSocket communication: {e}")
-        await websocket.send_text(f"Error: {e}")
+        await websocket.send_text({"error": str(e)})
     finally:
         if os.path.exists(audio_file_path):
             os.remove(audio_file_path)
