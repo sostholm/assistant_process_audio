@@ -89,21 +89,23 @@ for user in known_users:
         # Get raw bytes from voice_data
         raw_bytes = voice_data.getvalue() if isinstance(voice_data, io.BytesIO) else voice_data
 
-        # Detect file type based on header
+        # Log file size and header snippet
+        logger.info(f"Voice sample size: {len(raw_bytes)} bytes, header: {raw_bytes[:10]}")
+        
+        # Detect file type based on header (simple check)
         if raw_bytes.startswith(b"RIFF"):
             file_suffix = ".wav"
-            file_format = "wav"
         else:
             file_suffix = ".mp3"
-            file_format = "mp3"
 
         # Write the bytes to a temporary file with an appropriate suffix
         with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=False) as tmp_file:
             tmp_file.write(raw_bytes)
             tmp_file_path = tmp_file.name
-        
+
         try:
-            signal, sample_rate = torchaudio.load(tmp_file_path, format=file_format)
+            # Let torchaudio auto-detect file format
+            signal, sample_rate = torchaudio.load(tmp_file_path)
         finally:
             os.remove(tmp_file_path)
 
