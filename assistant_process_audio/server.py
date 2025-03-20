@@ -86,18 +86,27 @@ known_users = get_users_voice_recognition()
 # Load reference embeddings for known speakers
 for user in known_users:
     for voice_data in user.voice_recognition:
-        # Write the mp3 bytes to a temporary file
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-            # Ensure we write raw bytes; if voice_data is a BytesIO, use getvalue()
-            if isinstance(voice_data, io.BytesIO):
-                tmp_file.write(voice_data.getvalue())
-            else:
-                tmp_file.write(voice_data)
+        # Get raw bytes from voice_data
+        raw_bytes = voice_data.getvalue() if isinstance(voice_data, io.BytesIO) else voice_data
+
+        # Detect file type based on header
+        if raw_bytes.startswith(b"RIFF"):
+            file_suffix = ".wav"
+            file_format = "wav"
+        else:
+            file_suffix = ".mp3"
+            file_format = "mp3"
+
+        # Write the bytes to a temporary file with an appropriate suffix
+        with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=False) as tmp_file:
+            tmp_file.write(raw_bytes)
             tmp_file_path = tmp_file.name
+        
         try:
-            signal, sample_rate = torchaudio.load(tmp_file_path, format="mp3")
+            signal, sample_rate = torchaudio.load(tmp_file_path, format=file_format)
         finally:
             os.remove(tmp_file_path)
+
         if sample_rate != 16000:
             resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
             signal = resampler(signal)
