@@ -88,7 +88,11 @@ for user in known_users:
     for voice_data in user.voice_recognition:
         # Write the mp3 bytes to a temporary file
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-            tmp_file.write(voice_data)
+            # Ensure we write raw bytes; if voice_data is a BytesIO, use getvalue()
+            if isinstance(voice_data, io.BytesIO):
+                tmp_file.write(voice_data.getvalue())
+            else:
+                tmp_file.write(voice_data)
             tmp_file_path = tmp_file.name
         try:
             signal, sample_rate = torchaudio.load(tmp_file_path, format="mp3")
