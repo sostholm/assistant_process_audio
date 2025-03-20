@@ -85,7 +85,7 @@ known_users = get_users_voice_recognition()
 # Load reference embeddings for known speakers
 for user in known_users:
     for voice_data in user.voice_recognition:
-        mp3_stream = io.BytesIO(voice_data)
+        mp3_stream = voice_data
         signal, sample_rate = torchaudio.load(mp3_stream, format="mp3")
         if sample_rate != 16000:
             resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)

@@ -2,6 +2,7 @@ import psycopg
 import os
 from dataclasses import dataclass
 from typing import List, Optional
+import io
 
 POSTGRES_USER     = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
@@ -52,9 +53,10 @@ def get_users_voice_recognition() -> List[UserVoiceRecognition]:
         if voice_data is None:
             continue
         # Convert voice_data to bytes if it's a bytearray
+
         results.append(UserVoiceRecognition(
             user_id=user_id,
             nick_name=nick_name,
-            voice_recognition=bytes(voice_data) if isinstance(voice_data, bytearray) else voice_data
+            voice_recognition=io.BytesIO(voice_data)
         ))
     return results
