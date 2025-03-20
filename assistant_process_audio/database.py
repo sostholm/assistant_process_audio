@@ -51,9 +51,10 @@ def get_users_voice_recognition() -> List[UserVoiceRecognition]:
         user_id, nick_name, voice_data = row
         if voice_data is None:
             continue
+        # Convert voice_data to bytes if it's a bytearray
         results.append(UserVoiceRecognition(
             user_id=user_id,
             nick_name=nick_name,
-            voice_recognition=voice_data
+            voice_recognition=bytes(voice_data) if isinstance(voice_data, bytearray) else voice_data
         ))
     return results
