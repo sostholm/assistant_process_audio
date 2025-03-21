@@ -22,7 +22,7 @@ conn = psycopg.connect(
 class UserVoiceRecognition:
     user_id: str
     nick_name: Optional[str]
-    voice_recognition: List[bytes]
+    voice_recognition: bytes
 
 def get_users_voice_recognition() -> List[UserVoiceRecognition]:
     cursor = conn.cursor()
@@ -42,7 +42,8 @@ def get_users_voice_recognition() -> List[UserVoiceRecognition]:
             ai.ai_name,
             vr.voice_recognition AS voice_data
         FROM ai 
-        LEFT JOIN voice_recognition vr ON ai.ai_id = vr.ai_id;""")
+        LEFT JOIN voice_recognition vr ON ai.ai_id = vr.ai_id;
+    """)
     
     rows += cursor.fetchall()
     cursor.close()
@@ -52,11 +53,11 @@ def get_users_voice_recognition() -> List[UserVoiceRecognition]:
         user_id, nick_name, voice_data = row
         if voice_data is None:
             continue
-        # Convert voice_data to bytes if it's a bytearray
-
+        # Ensure full data is converted to bytes (from memoryview/bytearray)
+        full_voice = bytes(voice_data)
         results.append(UserVoiceRecognition(
             user_id=user_id,
             nick_name=nick_name,
-            voice_recognition=io.BytesIO(voice_data)
+            voice_recognition=full_voice
         ))
     return results

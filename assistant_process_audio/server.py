@@ -85,38 +85,21 @@ known_users = get_users_voice_recognition()
 
 # Load reference embeddings for known speakers
 for user in known_users:
-    for voice_data in user.voice_recognition:
-        # Get raw bytes from voice_data
-        raw_bytes = voice_data.getvalue() if isinstance(voice_data, io.BytesIO) else voice_data
+    # user.voice_recognition is now a bytes object
+    raw_bytes = user.voice_recognition
+    # Wrap raw bytes in a BytesIO stream and let torchaudio load it.
+    mp3_stream = io.BytesIO(raw_bytes)
+    # Let torchaudio auto-detect the format
+    signal, sample_rate = torchaudio.load(mp3_stream)  
 
-        # Log file size and header snippet
-        logger.info(f"Voice sample size: {len(raw_bytes)} bytes, header: {raw_bytes[:10]}")
-        
-        # Detect file type based on header (simple check)
-        if raw_bytes.startswith(b"RIFF"):
-            file_suffix = ".wav"
-        else:
-            file_suffix = ".mp3"
-
-        # Write the bytes to a temporary file with an appropriate suffix
-        with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=False) as tmp_file:
-            tmp_file.write(raw_bytes)
-            tmp_file_path = tmp_file.name
-
-        try:
-            # Let torchaudio auto-detect file format
-            signal, sample_rate = torchaudio.load(tmp_file_path)
-        finally:
-            os.remove(tmp_file_path)
-
-        if sample_rate != 16000:
-            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-            signal = resampler(signal)
-        if signal.shape[0] > 1:
-            signal = torch.mean(signal, dim=0, keepdim=True)
-        embedding = extract_embedding(signal, sample_rate)
-        reference_embeddings[user.nick_name] = embedding
-        logger.info(f"Loaded reference embedding for {user.nick_name}")
+    if sample_rate != 16000:
+        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+        signal = resampler(signal)
+    if signal.shape[0] > 1:
+        signal = torch.mean(signal, dim=0, keepdim=True)
+    embedding = extract_embedding(signal, sample_rate)
+    reference_embeddings[user.nick_name] = embedding
+    logger.info(f"Loaded reference embedding for {user.nick_name}")
 
 def transcribe(audio_file_path):
     # Transcribe the audio file
