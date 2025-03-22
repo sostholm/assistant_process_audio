@@ -142,10 +142,10 @@ def recognize_speakers(diarization_result, audio_file_path):
         if combined_signal.shape[0] > 1:
             combined_signal = torch.mean(combined_signal, dim=0, keepdim=True)
         
-        # Ensure signal length is at least kernel size (7) by padding if too short
-        kernel_size = 7
-        if combined_signal.shape[1] < kernel_size:
-            pad_length = kernel_size - combined_signal.shape[1]
+        # Ensure signal length is at least the minimum required (5 samples)
+        min_length = 5
+        if combined_signal.shape[1] < min_length:
+            pad_length = min_length - combined_signal.shape[1]
             combined_signal = torch.nn.functional.pad(combined_signal, (0, pad_length))
         
         # Extract embedding
