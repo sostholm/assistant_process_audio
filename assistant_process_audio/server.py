@@ -204,7 +204,7 @@ async def transcribe_audio(websocket: WebSocket):
             speech_segments = vad_result.get_timeline().support()
             if not speech_segments:
                 logger.info("No speech detected in audio")
-                await websocket.send_text("")
+                await websocket.send_text(json.dumps({}))
                 continue  # Skip processing
 
             # Perform transcription and diarization concurrently
