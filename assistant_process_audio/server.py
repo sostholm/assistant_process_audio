@@ -142,11 +142,12 @@ def recognize_speakers(diarization_result, audio_file_path):
         if combined_signal.shape[0] > 1:
             combined_signal = torch.mean(combined_signal, dim=0, keepdim=True)
         
-        # Ensure signal length is at least the minimum required (5 samples)
+        # Ensure signal length is at least the minimum required (5 samples); if not, skip speaker recognition
         min_length = 5
         if combined_signal.shape[1] < min_length:
-            pad_length = min_length - combined_signal.shape[1]
-            combined_signal = torch.nn.functional.pad(combined_signal, (0, pad_length))
+            logger.info(f"Speaker {speaker_label} segment too short for embedding; marking as Unknown")
+            identified_speakers[speaker_label] = "Unknown"
+            continue
         
         # Extract embedding
         embedding = extract_embedding(combined_signal, sample_rate)
