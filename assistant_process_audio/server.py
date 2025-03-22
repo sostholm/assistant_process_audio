@@ -131,15 +131,23 @@ def recognize_speakers(diarization_result, audio_file_path):
         if not combined_signal:
             identified_speakers[speaker_label] = "Unknown"
             continue
-        # Concatenate signals
+        # Concatenate signals along time dimension
         combined_signal = torch.cat(combined_signal, dim=1)
-        # Resample and convert to mono
+
+        # Resample and convert to mono if needed
         if sample_rate != 16000:
             resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
             combined_signal = resampler(combined_signal)
             sample_rate = 16000
         if combined_signal.shape[0] > 1:
             combined_signal = torch.mean(combined_signal, dim=0, keepdim=True)
+        
+        # Ensure signal length is at least kernel size (7) by padding if too short
+        kernel_size = 7
+        if combined_signal.shape[1] < kernel_size:
+            pad_length = kernel_size - combined_signal.shape[1]
+            combined_signal = torch.nn.functional.pad(combined_signal, (0, pad_length))
+        
         # Extract embedding
         embedding = extract_embedding(combined_signal, sample_rate)
         # Compare with reference embeddings
