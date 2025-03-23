@@ -142,26 +142,53 @@ def recognize_speakers(diarization_result, audio_file_path):
         if combined_signal.shape[0] > 1:
             combined_signal = torch.mean(combined_signal, dim=0, keepdim=True)
         
-        # Ensure signal length is at least the minimum required (7 samples);
-        # If too short, pad with zeros to reach length 7.
-        min_length = 7
+        # Check if the segment is too short for embedding
+        # The model's kernel size is 7, so we need at least that many samples
+        # Adding a small safety margin
+        min_length = 10  # Just slightly more than the kernel size of 7
         if combined_signal.shape[1] < min_length:
+            # If the segment is extremely short, skip it or mark as unknown
+            if combined_signal.shape[1] < 3:  # Too short to be meaningful
+                logger.info(f"Speaker {speaker_label} segment too short to process: {combined_signal.shape[1]} samples")
+                identified_speakers[speaker_label] = "Unknown"
+                continue
+                
+            # Pad with zeros to reach minimum length
             pad_length = min_length - combined_signal.shape[1]
-            logger.info(f"Speaker {speaker_label} segment too short; padding with {pad_length} zeros")
-            combined_signal = torch.nn.functional.pad(combined_signal, (0, pad_length))
+            logger.info(f"Speaker {speaker_label} segment short; padding with {pad_length} zeros")
+            # Pad on both sides for better results
+            pad_left = pad_length // 2
+            pad_right = pad_length - pad_left
+            combined_signal = F.pad(combined_signal, (pad_left, pad_right))
+            
+            # Double-check the padding was successful
+            if combined_signal.shape[1] < min_length:
+                logger.warning(f"Padding failed! Shape is still {combined_signal.shape}")
+                identified_speakers[speaker_label] = "Unknown"
+                continue
         
-        # Extract embedding and compare with reference embeddings
-        embedding = extract_embedding(combined_signal, sample_rate)
-        scores = {}
-        for ref_speaker, ref_embedding in reference_embeddings.items():
-            score = torch.nn.functional.cosine_similarity(embedding, ref_embedding.to(device), dim=0)
-            scores[ref_speaker] = score.item()
-        if scores:
-            identified_speaker = max(scores, key=scores.get)
-        else:
-            identified_speaker = "Unknown"
-        identified_speakers[speaker_label] = identified_speaker
-        logger.info(f"Speaker {speaker_label} identified as {identified_speaker}")
+        try:
+            # Extract embedding and compare with reference embeddings
+            embedding = extract_embedding(combined_signal, sample_rate)
+            scores = {}
+            for ref_speaker, ref_embedding in reference_embeddings.items():
+                score = F.cosine_similarity(embedding, ref_embedding.to(device), dim=0)
+                scores[ref_speaker] = score.item()
+            if scores:
+                identified_speaker = max(scores, key=scores.get)
+                max_score = scores[identified_speaker]
+                # Add a confidence threshold
+                if max_score < 0.5:  # Adjust this threshold as needed
+                    logger.info(f"Speaker {speaker_label} matched {identified_speaker} but score {max_score} below threshold")
+                    identified_speaker = "Unknown"
+            else:
+                identified_speaker = "Unknown"
+            identified_speakers[speaker_label] = identified_speaker
+            logger.info(f"Speaker {speaker_label} identified as {identified_speaker}")
+        except Exception as e:
+            logger.error(f"Error in speaker recognition for {speaker_label}: {e}")
+            identified_speakers[speaker_label] = "Unknown"
+    
     return identified_speakers
 
 def associate_speakers(transcription, diarization_result, identified_speakers):
