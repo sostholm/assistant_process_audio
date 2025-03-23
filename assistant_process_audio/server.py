@@ -142,21 +142,19 @@ def recognize_speakers(diarization_result, audio_file_path):
         if combined_signal.shape[0] > 1:
             combined_signal = torch.mean(combined_signal, dim=0, keepdim=True)
         
-        # Ensure signal length is at least the minimum required (5 samples); if not, skip speaker recognition
-        min_length = 5
+        # Ensure signal length is at least the minimum required (7 samples); if not, skip speaker recognition
+        min_length = 7
         if combined_signal.shape[1] < min_length:
             logger.info(f"Speaker {speaker_label} segment too short for embedding; marking as Unknown")
             identified_speakers[speaker_label] = "Unknown"
             continue
         
-        # Extract embedding
+        # Extract embedding and compare with reference embeddings
         embedding = extract_embedding(combined_signal, sample_rate)
-        # Compare with reference embeddings
         scores = {}
         for ref_speaker, ref_embedding in reference_embeddings.items():
             score = torch.nn.functional.cosine_similarity(embedding, ref_embedding.to(device), dim=0)
             scores[ref_speaker] = score.item()
-        # Identify the speaker with the highest score
         if scores:
             identified_speaker = max(scores, key=scores.get)
         else:
