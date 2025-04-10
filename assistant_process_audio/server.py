@@ -213,9 +213,7 @@ async def transcribe_audio(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection accepted")
 
-    # unique_id = str(uuid.uuid4())
-    # audio_file_path = f"{unique_id}_received_audio.wav"
-
+    audio_file_path = None
     try:
         while True:
             data = await websocket.receive_bytes()
@@ -223,15 +221,14 @@ async def transcribe_audio(websocket: WebSocket):
                 break
             logger.info("Received audio data")
             
-            # Save the received audio data to a file
-            audio_file_path = "received_audio.wav"
+            # Create a temporary WAV file with a unique name
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio_file:
+                temp_audio_file.write(data)
+                audio_file_path = temp_audio_file.name
+            
+            logger.info(f"Audio data saved to temporary file {audio_file_path}")
 
-            # After receiving all data, write to file
-            with open(audio_file_path, "wb") as f:
-                f.write(data)
-            logger.info(f"Audio data saved to {audio_file_path}")
-
-                        # Perform voice activity detection
+            # Perform voice activity detection
             vad_result = await asyncio.to_thread(vad_pipeline, audio_file_path)
             logger.info("VAD completed")
 
@@ -240,6 +237,10 @@ async def transcribe_audio(websocket: WebSocket):
             if not speech_segments:
                 logger.info("No speech detected in audio")
                 await websocket.send_text(json.dumps({}))
+                # Clean up the temporary file before continuing
+                if os.path.exists(audio_file_path):
+                    os.remove(audio_file_path)
+                    audio_file_path = None
                 continue  # Skip processing
 
             # Perform transcription and diarization concurrently
@@ -265,7 +266,7 @@ async def transcribe_audio(websocket: WebSocket):
         logger.error(f"Error during WebSocket communication: {e}")
         await websocket.send_text({"error": str(e)})
     finally:
-        if os.path.exists(audio_file_path):
+        if audio_file_path and os.path.exists(audio_file_path):
             os.remove(audio_file_path)
             logger.info(f"Removed temporary file {audio_file_path}")
         if not websocket.client_state.closed:
