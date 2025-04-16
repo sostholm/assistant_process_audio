@@ -84,6 +84,7 @@ def extract_embedding(signal, sample_rate):
 known_users = get_users_voice_recognition()
 
 # Load reference embeddings for known speakers
+reference_embeddings = {}
 for user in known_users:
     # user.voice_recognition is now a bytes object
     raw_bytes = user.voice_recognition
@@ -98,8 +99,12 @@ for user in known_users:
     if signal.shape[0] > 1:
         signal = torch.mean(signal, dim=0, keepdim=True)
     embedding = extract_embedding(signal, sample_rate)
-    reference_embeddings[user.nick_name] = embedding
-    logger.info(f"Loaded reference embedding for {user.nick_name}")
+    
+    # Append to a list of embeddings for this user instead of overwriting
+    if user.nick_name not in reference_embeddings:
+        reference_embeddings[user.nick_name] = []
+    reference_embeddings[user.nick_name].append(embedding)
+    logger.info(f"Loaded reference embedding for {user.nick_name} (total: {len(reference_embeddings[user.nick_name])})")
 
 def transcribe(audio_file_path):
     # Transcribe the audio file
@@ -171,9 +176,14 @@ def recognize_speakers(diarization_result, audio_file_path):
             # Extract embedding and compare with reference embeddings
             embedding = extract_embedding(combined_signal, sample_rate)
             scores = {}
-            for ref_speaker, ref_embedding in reference_embeddings.items():
-                score = F.cosine_similarity(embedding, ref_embedding.to(device), dim=0)
-                scores[ref_speaker] = score.item()
+            for ref_speaker, ref_embeddings_list in reference_embeddings.items():
+                # Compare against all embeddings for this user and take the highest score
+                max_score = -1
+                for ref_embedding in ref_embeddings_list:
+                    score = F.cosine_similarity(embedding, ref_embedding.to(device), dim=0)
+                    max_score = max(max_score, score.item())
+                scores[ref_speaker] = max_score
+                
             if scores:
                 identified_speaker = max(scores, key=scores.get)
                 max_score = scores[identified_speaker]
@@ -184,7 +194,7 @@ def recognize_speakers(diarization_result, audio_file_path):
             else:
                 identified_speaker = "Unknown"
             identified_speakers[speaker_label] = identified_speaker
-            logger.info(f"Speaker {speaker_label} identified as {identified_speaker}")
+            logger.info(f"Speaker {speaker_label} identified as {identified_speaker} with score {max_score:.4f}")
         except Exception as e:
             logger.error(f"Error in speaker recognition for {speaker_label}: {e}")
             identified_speakers[speaker_label] = "Unknown"
