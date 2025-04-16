@@ -178,7 +178,7 @@ def recognize_speakers(diarization_result, audio_file_path):
                 identified_speaker = max(scores, key=scores.get)
                 max_score = scores[identified_speaker]
                 # Add a confidence threshold
-                if max_score < 0.29:  # Adjust this threshold as needed
+                if max_score < 0.2:  # Adjust this threshold as needed
                     logger.info(f"Speaker {speaker_label} matched {identified_speaker} but score {max_score} below threshold")
                     identified_speaker = "Unknown"
             else:
