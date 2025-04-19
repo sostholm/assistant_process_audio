@@ -37,8 +37,10 @@ logger.info(f"Using device: {device}")
 
 # Initialize the Whisper model
 model_size = os.getenv("WHISPER_MODEL", "medium.en")
-model = WhisperModel(model_size, device=device_str)
-logger.info(f"Loaded Faster Whisper model: {model_size} on {device}")
+# Use float16 for RTX 4060
+compute_type = "float16"
+model = WhisperModel(model_size, device=device_str, compute_type=compute_type)
+logger.info(f"Loaded Faster Whisper model: {model_size} on {device} with compute_type: {compute_type}")
 
 # Initialize the pyannote pipelines
 # Remember to set your Hugging Face authentication token
@@ -123,82 +125,95 @@ def diarize(audio_file_path):
 
 def recognize_speakers(diarization_result, audio_file_path):
     identified_speakers = {}
-    signal_full, sample_rate = torchaudio.load(audio_file_path)
+    try:
+        signal_full, sample_rate = torchaudio.load(audio_file_path)
+        signal_full = signal_full.to(device) # Move full signal to device
+
+        # Resample full audio once if needed
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000).to(device)
+            signal_full = resampler(signal_full)
+            sample_rate = 16000 # Update sample rate after resampling
+
+        # Convert to mono once if needed
+        if signal_full.shape[0] > 1:
+            signal_full = torch.mean(signal_full, dim=0, keepdim=True)
+
+    except Exception as e:
+        logger.error(f"Error loading or preprocessing audio file {audio_file_path}: {e}", exc_info=True)
+        for speaker_label in diarization_result.labels():
+            identified_speakers[speaker_label] = "Unknown"
+        return identified_speakers
+
     for speaker_label in diarization_result.labels():
-        # Get all segments for this speaker
         speaker_segments = diarization_result.label_timeline(speaker_label)
-        combined_signal = []
+        combined_signal_list = []
         for segment in speaker_segments:
-            start_frame = int(segment.start * sample_rate)
+            start_frame = int(segment.start * sample_rate) # sample_rate is now always 16000
             end_frame = int(segment.end * sample_rate)
+            end_frame = min(end_frame, signal_full.shape[1])
+            start_frame = min(start_frame, end_frame)
+
             signal_segment = signal_full[:, start_frame:end_frame]
-            combined_signal.append(signal_segment)
-        if not combined_signal:
+            combined_signal_list.append(signal_segment)
+
+        if not combined_signal_list:
+            logger.warning(f"No valid segments found for speaker {speaker_label}")
             identified_speakers[speaker_label] = "Unknown"
             continue
-        # Concatenate signals along time dimension
-        combined_signal = torch.cat(combined_signal, dim=1)
 
-        # Resample and convert to mono if needed
-        if sample_rate != 16000:
-            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-            combined_signal = resampler(combined_signal)
-            sample_rate = 16000
-        if combined_signal.shape[0] > 1:
-            combined_signal = torch.mean(combined_signal, dim=0, keepdim=True)
-        
-        # Check if the segment is too short for embedding
-        # The model's kernel size is 7, so we need at least that many samples
-        # Adding a small safety margin
-        min_length = 10  # Just slightly more than the kernel size of 7
+        combined_signal = torch.cat(combined_signal_list, dim=1)
+
+        min_length = 10
         if combined_signal.shape[1] < min_length:
-            # If the segment is extremely short, skip it or mark as unknown
-            if combined_signal.shape[1] < 3:  # Too short to be meaningful
-                logger.info(f"Speaker {speaker_label} segment too short to process: {combined_signal.shape[1]} samples")
+            if combined_signal.shape[1] < 3:
+                logger.info(f"Speaker {speaker_label} combined segment too short: {combined_signal.shape[1]} samples")
                 identified_speakers[speaker_label] = "Unknown"
                 continue
-                
-            # Pad with zeros to reach minimum length
+
             pad_length = min_length - combined_signal.shape[1]
-            logger.info(f"Speaker {speaker_label} segment short; padding with {pad_length} zeros")
-            # Pad on both sides for better results
+            logger.info(f"Speaker {speaker_label} combined segment short; padding with {pad_length} zeros")
             pad_left = pad_length // 2
             pad_right = pad_length - pad_left
             combined_signal = F.pad(combined_signal, (pad_left, pad_right))
-            
-            # Double-check the padding was successful
+
             if combined_signal.shape[1] < min_length:
-                logger.warning(f"Padding failed! Shape is still {combined_signal.shape}")
+                logger.warning(f"Padding failed for speaker {speaker_label}! Shape is still {combined_signal.shape}")
                 identified_speakers[speaker_label] = "Unknown"
                 continue
-        
+
         try:
-            # Extract embedding and compare with reference embeddings
-            embedding = extract_embedding(combined_signal, sample_rate)
+            embedding = extract_embedding(combined_signal, sample_rate) # sample_rate is 16000
             scores = {}
+            max_overall_score = -float('inf')
+            best_match_speaker = "Unknown"
+
             for ref_speaker, ref_embeddings_list in reference_embeddings.items():
-                # Compare against all embeddings for this user and take the highest score
-                max_score = -1
+                max_user_score = -float('inf')
                 for ref_embedding in ref_embeddings_list:
                     score = F.cosine_similarity(embedding, ref_embedding.to(device), dim=0)
-                    max_score = max(max_score, score.item())
-                scores[ref_speaker] = max_score
-                
-            if scores:
-                identified_speaker = max(scores, key=scores.get)
-                max_score = scores[identified_speaker]
-                # Add a confidence threshold
-                if max_score < 0.27:  # Adjust this threshold as needed
-                    logger.info(f"Speaker {speaker_label} matched {identified_speaker} but score {max_score} below threshold")
-                    identified_speaker = "Unknown"
+                    max_user_score = max(max_user_score, score.item())
+
+                scores[ref_speaker] = max_user_score
+                if max_user_score > max_overall_score:
+                    max_overall_score = max_user_score
+                    best_match_speaker = ref_speaker
+
+            confidence_threshold = 0.27
+            if max_overall_score >= confidence_threshold:
+                identified_speaker = best_match_speaker
+                final_score_log = max_overall_score
             else:
                 identified_speaker = "Unknown"
+                final_score_log = max_overall_score
+
             identified_speakers[speaker_label] = identified_speaker
-            logger.info(f"Speaker {speaker_label} identified as {identified_speaker} with score {max_score:.4f}")
+            logger.info(f"Speaker {speaker_label} identified as {identified_speaker} with score {final_score_log:.4f} (Threshold: {confidence_threshold})")
+
         except Exception as e:
-            logger.error(f"Error in speaker recognition for {speaker_label}: {e}")
+            logger.error(f"Error during speaker recognition comparison for {speaker_label}: {e}", exc_info=True)
             identified_speakers[speaker_label] = "Unknown"
-    
+
     return identified_speakers
 
 def associate_speakers(transcription, diarization_result, identified_speakers):
