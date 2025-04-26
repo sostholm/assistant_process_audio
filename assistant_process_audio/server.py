@@ -25,6 +25,7 @@ import json
 import tempfile
 
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+LOW_PROB_THRESHOLD = float(os.getenv("LOW_PROB_THRESHOLD", 0.5))
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -109,13 +110,39 @@ for user in known_users:
     logger.info(f"Loaded reference embedding for {user.nick_name} (total: {len(reference_embeddings[user.nick_name])})")
 
 def transcribe(audio_file_path):
-    # Transcribe the audio file
-    segments, info = model.transcribe(audio_file_path, beam_size=5, language="en", vad_filter=True)
-    transcription = []
+    # Transcribe the audio file with word timestamps
+    segments, info = model.transcribe(audio_file_path, beam_size=5, language="en", vad_filter=True, word_timestamps=True)
+    
+    processed_segments = []
+
     for segment in segments:
-        transcription.append(segment)
-    logger.info("Transcription completed")
-    return transcription
+        current_words = []
+        if segment.words:
+            for word in segment.words:
+                word_text = word.word.strip() # Get the word text
+                # Check if probability is below threshold
+                if word.probability < LOW_PROB_THRESHOLD:
+                    marked_word = f"{word_text}(?)" # Mark the word
+                    current_words.append(marked_word)
+                    logger.debug(f"Low probability word: '{word_text}' (Prob: {word.probability:.2f}) -> Marked: '{marked_word}'")
+                else:
+                    current_words.append(word_text) # Keep original word
+            
+            processed_text = " ".join(current_words)
+        else:
+            # Fallback if word timestamps are not available for some reason
+            processed_text = segment.text
+            logger.warning("Segment found without word timestamps.")
+
+        processed_segments.append({
+            "start": segment.start,
+            "end": segment.end,
+            "text": processed_text
+        })
+        logger.debug(f"Processed segment text: {processed_text}")
+
+    logger.info("Transcription completed with low probability word marking")
+    return processed_segments
 
 def diarize(audio_file_path):
     # Process the audio file with the pipeline
@@ -219,19 +246,32 @@ def recognize_speakers(diarization_result, audio_file_path):
 def associate_speakers(transcription, diarization_result, identified_speakers):
     # Create a list to hold the final transcription
     final_transcription = []
-    for segment in transcription:
-        start_time = segment.start
-        end_time = segment.end
-        text = segment.text
+    # 'transcription' is now a list of dictionaries: [{"start": s, "end": e, "text": t}, ...]
+    for segment_info in transcription:
+        start_time = segment_info["start"]
+        end_time = segment_info["end"]
+        text = segment_info["text"] # Text may contain marked words like "word(?)"
+        
         # Find overlapping diarization segments
         overlapping_speakers = diarization_result.crop(Segment(start_time, end_time))
+        
         if overlapping_speakers:
-            # Get the most frequent speaker in the overlapping segments
-            speaker_label = overlapping_speakers.labels()[0]
-            identified_speaker = identified_speakers.get(speaker_label, "Unknown")
+            # Get the most frequent speaker label in the overlapping segments
+            # Ensure labels() returns a list and access the first element safely
+            labels = overlapping_speakers.labels()
+            if labels:
+                speaker_label = labels[0]
+                identified_speaker = identified_speakers.get(speaker_label, "Unknown")
+            else:
+                # Handle cases where crop might return an empty annotation for the segment
+                identified_speaker = "Unknown"
+                logger.warning(f"No speaker label found for segment: {start_time}-{end_time}")
         else:
             identified_speaker = "Unknown"
+            logger.warning(f"No overlapping diarization segment found for transcription segment: {start_time}-{end_time}")
+            
         final_transcription.append({identified_speaker: text})
+        
     return final_transcription
 
 async def transcribe_audio(websocket: WebSocket):
